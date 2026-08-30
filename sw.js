@@ -189,7 +189,15 @@ self.addEventListener('message', (event) => {
         const videoUrl = event.data.url;
         caches.open(CACHE_NAME)
             .then((cache) => {
-                return cache.add(videoUrl);
+                // Manual fetch with CORS mode to handle external Telegram media
+                return fetch(videoUrl, { mode: 'cors' })
+                    .then((response) => {
+                        if (!response.ok) {
+                            throw new Error(`Failed to fetch video: ${response.status} ${response.statusText}`);
+                        }
+                        // Cache the response manually
+                        return cache.put(videoUrl, response);
+                    });
             })
             .then(() => {
                 event.ports[0].postMessage({ success: true });
