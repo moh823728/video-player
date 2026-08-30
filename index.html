@@ -252,6 +252,76 @@
         // ========================================
         
         /**
+         * Get proxy URL with fallback options
+         */
+        function getProxyUrl(originalUrl, proxyIndex = 0) {
+            const proxies = [
+                `https://corsproxy.io/?${encodeURIComponent(originalUrl)}`,
+                `https://api.allorigins.win/raw?url=${encodeURIComponent(originalUrl)}`,
+                `https://cors-proxy.htmldriven.com/?url=${encodeURIComponent(originalUrl)}`
+            ];
+            return proxies[proxyIndex] || proxies[0];
+        }
+
+        /**
+         * Silent background caching - doesn't interrupt playback
+         */
+        async function silentBackgroundCache(videoUrl) {
+            try {
+                console.log('Starting silent background caching...');
+                
+                // Try each proxy in sequence
+                for (let i = 0; i < 3; i++) {
+                    try {
+                        const proxyUrl = getProxyUrl(videoUrl, i);
+                        console.log(`Attempting background cache with proxy ${i + 1}:`, proxyUrl);
+                        
+                        const response = await fetch(proxyUrl);
+                        if (!response.ok) {
+                            console.log(`Proxy ${i + 1} failed with status: ${response.status}`);
+                            continue;
+                        }
+
+                        const blob = await response.blob();
+                        if (blob.size === 0) {
+                            console.log(`Proxy ${i + 1} returned empty blob`);
+                            continue;
+                        }
+
+                        // Cache the blob
+                        if ('caches' in window) {
+                            const cache = await caches.open(CONFIG.CACHE_NAME);
+                            const cachedResponse = new Response(blob, {
+                                headers: { 
+                                    'Content-Type': 'video/mp4',
+                                    'Content-Length': blob.size.toString()
+                                }
+                            });
+                            await cache.put(videoUrl, cachedResponse);
+                            
+                            localStorage.setItem('lastCachedVideoUrl', videoUrl);
+                            localStorage.setItem('lastCachedVideoTitle', currentVideoTitle || 'Video');
+                            localStorage.setItem('lastCachedVideoDate', currentVideoDate || '-');
+                            
+                            console.log('Background caching completed successfully');
+                            updateStatus('cached');
+                            return true;
+                        }
+                    } catch (proxyError) {
+                        console.log(`Proxy ${i + 1} error:`, proxyError.message);
+                        continue;
+                    }
+                }
+                
+                console.log('All proxies failed for background caching');
+                return false;
+            } catch (error) {
+                console.log('Background caching failed silently:', error.message);
+                return false;
+            }
+        }
+
+        /**
          * Fetch latest video from Telegram channel
          */
         async function fetchLatestVideo() {
@@ -341,46 +411,92 @@
                 const filePath = fileData.result.file_path;
                 currentVideoUrl = `https://api.telegram.org/file/bot${CONFIG.BOT_TOKEN}/${filePath}`;
 
-                // Fetch video as blob through proxy and auto-cache
-                const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(currentVideoUrl)}`;
-                console.log('Fetching video via proxy:', proxyUrl);
-                
-                const videoResponse = await fetch(proxyUrl);
-                if (!videoResponse.ok) {
-                    throw new Error(`Proxy failed with status: ${videoResponse.status}`);
-                }
+                // Try direct streaming with fallback proxies
+                let streamUrl = currentVideoUrl;
+                let streamSuccess = false;
 
-                const blob = await videoResponse.blob();
-                if (blob.size === 0) {
-                    throw new Error('Downloaded video blob is empty');
-                }
-
-                // Create object URL for immediate playback
-                const objectUrl = URL.createObjectURL(blob);
-                videoPlayer.src = objectUrl;
-                videoPlayer.load();
-
-                // Auto-cache the blob
-                if ('caches' in window) {
-                    const cache = await caches.open(CONFIG.CACHE_NAME);
-                    const cachedResponse = new Response(blob, {
-                        headers: { 
-                            'Content-Type': 'video/mp4',
-                            'Content-Length': blob.size.toString()
-                        }
+                // First try direct Telegram URL (might work without proxy)
+                try {
+                    console.log('Trying direct Telegram URL for streaming:', currentVideoUrl);
+                    videoPlayer.src = currentVideoUrl;
+                    videoPlayer.load();
+                    
+                    // Wait a moment to see if it loads
+                    await new Promise((resolve, reject) => {
+                        const timeout = setTimeout(() => {
+                            videoPlayer.onerror = null;
+                            reject(new Error('Direct URL failed to load'));
+                        }, 3000);
+                        
+                        videoPlayer.onerror = () => {
+                            clearTimeout(timeout);
+                            reject(new Error('Direct URL error'));
+                        };
+                        
+                        videoPlayer.onloadedmetadata = () => {
+                            clearTimeout(timeout);
+                            videoPlayer.onloadedmetadata = null;
+                            resolve();
+                        };
                     });
-                    await cache.put(currentVideoUrl, cachedResponse);
                     
-                    localStorage.setItem('lastCachedVideoUrl', currentVideoUrl);
-                    localStorage.setItem('lastCachedVideoTitle', currentVideoTitle || 'Video');
-                    localStorage.setItem('lastCachedVideoDate', currentVideoDate || '-');
+                    streamSuccess = true;
+                    console.log('Direct streaming successful');
+                } catch (directError) {
+                    console.log('Direct streaming failed:', directError.message);
                     
-                    console.log('Video auto-cached successfully');
+                    // Try proxies for streaming
+                    for (let i = 0; i < 3; i++) {
+                        try {
+                            streamUrl = getProxyUrl(currentVideoUrl, i);
+                            console.log(`Trying proxy ${i + 1} for streaming:`, streamUrl);
+                            
+                            videoPlayer.src = streamUrl;
+                            videoPlayer.load();
+                            
+                            await new Promise((resolve, reject) => {
+                                const timeout = setTimeout(() => {
+                                    videoPlayer.onerror = null;
+                                    reject(new Error(`Proxy ${i + 1} timeout`));
+                                }, 5000);
+                                
+                                videoPlayer.onerror = () => {
+                                    clearTimeout(timeout);
+                                    reject(new Error(`Proxy ${i + 1} error`));
+                                };
+                                
+                                videoPlayer.onloadedmetadata = () => {
+                                    clearTimeout(timeout);
+                                    videoPlayer.onloadedmetadata = null;
+                                    resolve();
+                                };
+                            });
+                            
+                            streamSuccess = true;
+                            console.log(`Proxy ${i + 1} streaming successful`);
+                            break;
+                        } catch (proxyError) {
+                            console.log(`Proxy ${i + 1} streaming failed:`, proxyError.message);
+                            continue;
+                        }
+                    }
+                }
+
+                if (!streamSuccess) {
+                    throw new Error('All streaming attempts failed. Please check your internet connection.');
                 }
 
                 // Update UI
                 updateInfo();
-                updateStatus('cached');
+                updateStatus('online');
+                console.log('Video ready for streaming, background caching will start on playback');
+
+                // Start silent background caching after video starts playing
+                videoPlayer.addEventListener('playing', function onPlaying() {
+                    videoPlayer.removeEventListener('playing', onPlaying);
+                    console.log('Video started playing, initiating background caching...');
+                    silentBackgroundCache(currentVideoUrl);
+                }, { once: true });
 
             } catch (err) {
                 showError(err.message);
