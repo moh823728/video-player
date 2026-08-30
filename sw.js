@@ -189,14 +189,25 @@ self.addEventListener('message', (event) => {
         const videoUrl = event.data.url;
         caches.open(CACHE_NAME)
             .then((cache) => {
-                // Manual fetch with CORS mode to handle external Telegram media
-                return fetch(videoUrl, { mode: 'cors' })
+                // Fetch video as blob to handle ranged requests and 503 errors
+                return fetch(videoUrl)
                     .then((response) => {
                         if (!response.ok) {
                             throw new Error(`Failed to fetch video: ${response.status} ${response.statusText}`);
                         }
-                        // Cache the response manually
-                        return cache.put(videoUrl, response);
+                        // Download as blob to avoid 503 errors with streaming
+                        return response.blob();
+                    })
+                    .then((blob) => {
+                        // Create a new Response with the blob and proper headers
+                        const cachedResponse = new Response(blob, {
+                            headers: { 
+                                'Content-Type': 'video/mp4',
+                                'Content-Length': blob.size
+                            }
+                        });
+                        // Cache the blob response
+                        return cache.put(videoUrl, cachedResponse);
                     });
             })
             .then(() => {

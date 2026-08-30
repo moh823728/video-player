@@ -379,18 +379,31 @@
                     }
                 }
 
-                // Open cache and manually fetch and cache the video
-                const cache = await caches.open(CONFIG.CACHE_NAME);
-                
-                // Manual fetch with CORS mode to handle external Telegram media
-                const response = await fetch(currentVideoUrl, { mode: 'cors' });
-                
+                // Fetch video response as blob to handle ranged requests and 503 errors
+                const response = await fetch(currentVideoUrl);
                 if (!response.ok) {
-                    throw new Error(`Failed to fetch video: ${response.status} ${response.statusText}`);
+                    throw new Error(`Server returned ${response.status} ${response.statusText}`);
                 }
                 
-                // Cache the response manually
-                await cache.put(currentVideoUrl, response);
+                // Download as blob to avoid 503 errors with streaming
+                const blob = await response.blob();
+                
+                // Create a new Response with the blob and proper headers
+                const cachedResponse = new Response(blob, {
+                    headers: { 
+                        'Content-Type': response.headers.get('Content-Type') || 'video/mp4',
+                        'Content-Length': blob.size
+                    }
+                });
+
+                // Open cache and store the blob response
+                const cache = await caches.open(CONFIG.CACHE_NAME);
+                await cache.put(currentVideoUrl, cachedResponse);
+
+                // Save last cached video URL and metadata in localStorage for offline initialization
+                localStorage.setItem('lastCachedVideoUrl', currentVideoUrl);
+                localStorage.setItem('lastCachedVideoTitle', currentVideoTitle || 'Video');
+                localStorage.setItem('lastCachedVideoDate', currentVideoDate || '-');
 
                 updateStatus('cached');
                 alert('Video cached successfully! You can now watch it offline.');
@@ -409,6 +422,19 @@
             try {
                 if ('caches' in window) {
                     await caches.delete(CONFIG.CACHE_NAME);
+                    
+                    // Clear localStorage entries
+                    localStorage.removeItem('lastCachedVideoUrl');
+                    localStorage.removeItem('lastCachedVideoTitle');
+                    localStorage.removeItem('lastCachedVideoDate');
+                    
+                    // Reset current video state
+                    currentVideoUrl = null;
+                    currentVideoTitle = null;
+                    currentVideoDate = null;
+                    updateVideoPlayer();
+                    updateInfo();
+                    
                     updateStatus('online');
                     alert('Cache cleared successfully');
                     
@@ -487,11 +513,17 @@
                 updateStatus(currentVideoUrl ? 'online' : 'online');
             } else {
                 updateStatus('offline');
+                // Try to load cached video when going offline
+                loadCachedVideoOnStartup();
             }
         }
 
         window.addEventListener('online', updateOnlineStatus);
-        window.addEventListener('offline', updateOnlineStatus);
+        window.addEventListener('offline', () => {
+            updateOnlineStatus();
+            // Try to load cached video when going offline
+            loadCachedVideoOnStartup();
+        });
 
         // ========================================
         // EVENT LISTENERS
@@ -534,12 +566,53 @@
             }
         }
 
-        // Initial status check
+        // Load cached video from localStorage when offline
+        async function loadCachedVideoOnStartup() {
+            try {
+                // Check if we're offline and have cached video info
+                if (!navigator.onLine) {
+                    const cachedUrl = localStorage.getItem('lastCachedVideoUrl');
+                    const cachedTitle = localStorage.getItem('lastCachedVideoTitle');
+                    const cachedDate = localStorage.getItem('lastCachedVideoDate');
+
+                    if (cachedUrl) {
+                        // Try to load from cache
+                        const cache = await caches.open(CONFIG.CACHE_NAME);
+                        const cachedResponse = await cache.match(cachedUrl);
+
+                        if (cachedResponse) {
+                            // Load the cached video
+                            currentVideoUrl = cachedUrl;
+                            currentVideoTitle = cachedTitle || 'Cached Video';
+                            currentVideoDate = cachedDate || '-';
+                            
+                            updateVideoPlayer();
+                            updateInfo();
+                            updateStatus('cached');
+                            console.log('Loaded cached video from localStorage:', cachedUrl);
+                        } else {
+                            console.log('Cached video URL found in localStorage but not in cache');
+                            updateStatus('offline');
+                        }
+                    } else {
+                        console.log('No cached video found in localStorage');
+                        updateStatus('offline');
+                    }
+                }
+            } catch (err) {
+                console.log('Error loading cached video on startup:', err);
+                updateStatus('offline');
+            }
+        }
+
+        // Initial status check and load cached video if offline
         setTimeout(() => {
             if (navigator.onLine) {
                 updateStatus('online');
             } else {
                 updateStatus('offline');
+                // Try to load cached video when offline
+                loadCachedVideoOnStartup();
             }
         }, 1000);
     </script>
