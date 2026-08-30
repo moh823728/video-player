@@ -86,7 +86,8 @@ self.addEventListener('fetch', (event) => {
                             return fetch(request)
                                 .then((networkResponse) => {
                                     // Don't cache non-successful responses
-                                    if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
+                                    // Note: Telegram API returns 'cors' type responses, not 'basic'
+                                    if (!networkResponse || networkResponse.status !== 200) {
                                         return networkResponse;
                                     }
 

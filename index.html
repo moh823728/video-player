@@ -6,6 +6,8 @@
     <meta name="theme-color" content="#1a1a1a">
     <meta name="description" content="Offline Video Player for Telegram Channel">
     <title>Telegram Video Player</title>
+    <link rel="manifest" href="/manifest.json">
+    <link rel="apple-touch-icon" href="/icon-192.png">
     <style>
         * {
             margin: 0;
@@ -220,7 +222,7 @@
             BOT_TOKEN: '8956265531:AAHFQKgAX7m8hnVqAYGFML19_MGUQMCmoZw',
             
             // Your Private Channel ID (format: -100XXXXXXXXXX)
-            CHANNEL_ID: '​-1004498225842​',
+            CHANNEL_ID: '-1004498225842',
             
             // Cache name for offline storage
             CACHE_NAME: 'telegram-video-cache-v1'
@@ -273,23 +275,59 @@
                     throw new Error(`Telegram API error: ${data.description}`);
                 }
 
+                // Debug: Log the raw response
+                console.log('Telegram API response:', data);
+                console.log('Number of updates received:', data.result.length);
+                console.log('Looking for channel ID:', CONFIG.CHANNEL_ID);
+
                 // Find the latest video message from the channel
+                // Note: Channels use 'channel_post' instead of 'message'
                 const channelMessages = data.result
-                    .filter(update => 
-                        update.message && 
-                        update.message.chat && 
-                        update.message.chat.id.toString() === CONFIG.CHANNEL_ID &&
-                        update.message.video
-                    )
-                    .sort((a, b) => b.message.date - a.message.date);
+                    .filter(update => {
+                        // Handle both regular messages and channel posts
+                        const post = update.channel_post || update.message;
+                        if (!post) return false;
+                        
+                        // Check if it's from the correct channel
+                        if (!post.chat || post.chat.id.toString() !== CONFIG.CHANNEL_ID) {
+                            return false;
+                        }
+                        
+                        // Check for video (either as video object or document with video mime type)
+                        return post.video || (post.document && post.document.mime_type && post.document.mime_type.startsWith('video/'));
+                    })
+                    .sort((a, b) => {
+                        const postA = a.channel_post || a.message;
+                        const postB = b.channel_post || b.message;
+                        return postB.date - postA.date;
+                    });
 
                 if (channelMessages.length === 0) {
-                    throw new Error('No video found in the channel');
+                    // Provide more detailed error message
+                    const hasUpdates = data.result.length > 0;
+                    if (hasUpdates) {
+                        throw new Error('No video found in the channel. The channel may contain other types of content, or the bot may not have permission to read messages.');
+                    } else {
+                        throw new Error('No updates found. The bot may not be added to the channel, or the channel ID may be incorrect.');
+                    }
                 }
 
-                const latestMessage = channelMessages[0].message;
-                const videoFileId = latestMessage.video.file_id;
-                currentVideoTitle = latestMessage.video.file_name || 'Video';
+                const latestUpdate = channelMessages[0];
+                const latestMessage = latestUpdate.channel_post || latestUpdate.message;
+                
+                // Handle both video objects and document objects
+                let videoFileId, videoFileName;
+                if (latestMessage.video) {
+                    videoFileId = latestMessage.video.file_id;
+                    videoFileName = latestMessage.video.file_name || 'Video';
+                } else if (latestMessage.document) {
+                    videoFileId = latestMessage.document.file_id;
+                    videoFileName = latestMessage.document.file_name || 'Video';
+                } else {
+                    throw new Error('No video or document found in message');
+                }
+                
+                currentVideoTitle = videoFileName;
                 currentVideoDate = new Date(latestMessage.date * 1000).toLocaleString();
 
                 // Get file path
