@@ -189,45 +189,26 @@ self.addEventListener('message', (event) => {
         const videoUrl = event.data.url;
         caches.open(CACHE_NAME)
             .then((cache) => {
-                let response;
-                let blob;
-
-                // First attempt: Direct fetch with request headers
-                return fetch(videoUrl, {
-                    method: 'GET',
-                    headers: {
-                        'Accept': 'video/mp4,video/*;q=0.9,*/*;q=0.8'
-                    }
-                })
-                    .then((directResponse) => {
-                        if (!directResponse.ok) {
-                            throw new Error(`Direct fetch failed with status ${directResponse.status}`);
+                // FORCE DIRECT PROXY - DO NOT TRY DIRECT FETCH
+                const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(videoUrl)}`;
+                console.log('Service Worker: Fetching video via proxy:', proxyUrl);
+                
+                return fetch(proxyUrl)
+                    .then((response) => {
+                        if (!response.ok) {
+                            throw new Error(`Proxy failed with status: ${response.status}`);
                         }
-                        response = directResponse;
-                        return directResponse.blob();
+                        return response.blob();
                     })
-                    .catch((directError) => {
-                        console.log('Direct fetch failed in SW, trying CORS proxy fallback:', directError.message);
+                    .then((blob) => {
+                        if (blob.size === 0) {
+                            throw new Error('Downloaded video blob is empty');
+                        }
                         
-                        // Fallback: Use CORS proxy for 503/CORS errors
-                        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(videoUrl)}`;
-                        console.log('Fetching via CORS proxy in SW:', proxyUrl);
-                        
-                        return fetch(proxyUrl)
-                            .then((proxyResponse) => {
-                                if (!proxyResponse.ok) {
-                                    throw new Error(`CORS proxy fetch failed with status ${proxyResponse.status}`);
-                                }
-                                response = proxyResponse;
-                                return proxyResponse.blob();
-                            });
-                    })
-                    .then((fetchedBlob) => {
-                        blob = fetchedBlob;
                         // Create a new Response with the blob and proper headers
                         const cachedResponse = new Response(blob, {
                             headers: { 
-                                'Content-Type': response.headers.get('Content-Type') || 'video/mp4',
+                                'Content-Type': 'video/mp4',
                                 'Content-Length': blob.size
                             }
                         });

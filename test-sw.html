@@ -37,8 +37,7 @@
         <button onclick="testCache()">Test Cache</button>
         <button onclick="testCORSCaching()">Test CORS Caching</button>
         <button onclick="testBlobCaching()">Test Blob Caching</button>
-        <button onclick="testRequestHeaders()">Test Request Headers</button>
-        <button onclick="testCORSProxy()">Test CORS Proxy Fallback</button>
+        <button onclick="testCORSProxy()">Test CORS Proxy Only</button>
         <button onclick="testLocalStorage()">Test LocalStorage</button>
         <button onclick="clearCache()">Clear Cache</button>
         <button onclick="unregisterSW()">Unregister SW</button>
@@ -157,78 +156,29 @@
             }
         }
 
-        async function testRequestHeaders() {
-            try {
-                log('Testing request headers for 503 bypass...', 'info');
-                
-                // Use a test endpoint that accepts various headers
-                const testUrl = 'https://httpbin.org/headers';
-                
-                const response = await fetch(testUrl, {
-                    method: 'GET',
-                    headers: {
-                        'Accept': 'video/mp4,video/*;q=0.9,*/*;q=0.8'
-                    }
-                });
-                
-                if (!response.ok) {
-                    throw new Error(`Failed to fetch with headers: ${response.status}`);
-                }
-                
-                const data = await response.json();
-                log(`Request headers test successful. Server received headers:`, 'success');
-                log(`Accept header: ${data.headers.Accept}`, 'info');
-            } catch (error) {
-                log(`Request headers test failed: ${error.message}`, 'error');
-            }
-        }
-
         async function testCORSProxy() {
             try {
-                log('Testing CORS proxy fallback mechanism...', 'info');
+                log('Testing CORS proxy (primary method)...', 'info');
                 
-                // Test with a URL that might have CORS issues
+                // Test with a sample URL
                 const testUrl = 'https://api.telegram.org/file/bot8956265531:AAHFQKgAX7m8hnVqAYGFML19_MGUQMCmoZw/test';
                 
-                // First try direct fetch
-                let response;
-                let usedProxy = false;
+                // Direct to CORS proxy (no fallback)
+                const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(testUrl)}`;
+                log(`Fetching via CORS proxy: ${proxyUrl}`, 'info');
                 
-                try {
-                    log('Attempting direct fetch...', 'info');
-                    response = await fetch(testUrl, {
-                        method: 'GET',
-                        headers: {
-                            'Accept': 'video/mp4,video/*;q=0.9,*/*;q=0.8'
-                        }
-                    });
-                    
-                    if (!response.ok) {
-                        throw new Error(`Direct fetch failed with status ${response.status}`);
-                    }
-                    
-                    log('Direct fetch successful', 'success');
-                } catch (directError) {
-                    log(`Direct fetch failed: ${directError.message}, trying CORS proxy...`, 'info');
-                    
-                    // Fallback to CORS proxy
-                    const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(testUrl)}`;
-                    log(`Fetching via CORS proxy: ${proxyUrl}`, 'info');
-                    
-                    response = await fetch(proxyUrl);
-                    
-                    if (!response.ok) {
-                        throw new Error(`CORS proxy fetch failed with status ${response.status}`);
-                    }
-                    
-                    usedProxy = true;
-                    log('CORS proxy fetch successful', 'success');
+                const response = await fetch(proxyUrl);
+                
+                if (!response.ok) {
+                    throw new Error(`CORS proxy fetch failed with status ${response.status}`);
                 }
                 
-                const resultMessage = usedProxy 
-                    ? 'CORS proxy fallback test successful' 
-                    : 'Direct fetch test successful (no proxy needed)';
-                log(resultMessage, 'success');
+                const blob = await response.blob();
+                if (blob.size === 0) {
+                    throw new Error('Downloaded blob is empty');
+                }
+                
+                log(`CORS proxy test successful. Downloaded ${blob.size} bytes`, 'success');
                 
             } catch (error) {
                 log(`CORS proxy test failed: ${error.message}`, 'error');
@@ -316,9 +266,6 @@
             await new Promise(resolve => setTimeout(resolve, 500));
             
             await testBlobCaching();
-            await new Promise(resolve => setTimeout(resolve, 500));
-            
-            await testRequestHeaders();
             await new Promise(resolve => setTimeout(resolve, 500));
             
             await testCORSProxy();
