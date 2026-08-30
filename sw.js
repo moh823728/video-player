@@ -3,7 +3,7 @@
 // ========================================
 
 const CACHE_NAME = 'telegram-video-cache-v1';
-const OFFLINE_URL = '/index.html';
+const OFFLINE_URL = './index.html';
 
 // ========================================
 // INSTALL EVENT - CACHE ASSETS
@@ -15,8 +15,12 @@ self.addEventListener('install', (event) => {
         caches.open(CACHE_NAME)
             .then((cache) => {
                 console.log('[Service Worker] Caching app shell');
-                // Cache the main HTML file
-                return cache.add(OFFLINE_URL);
+                // Cache essential static assets with relative paths
+                return cache.addAll([
+                    './',
+                    './index.html',
+                    './manifest.json'
+                ]);
             })
             .then(() => {
                 // Force the waiting service worker to become the active service worker
@@ -148,7 +152,17 @@ self.addEventListener('fetch', (event) => {
                         .catch((error) => {
                             // If offline and request is for HTML, serve cached index.html
                             if (request.mode === 'navigate') {
-                                return caches.match(OFFLINE_URL);
+                                console.log('[Service Worker] Offline - serving cached index.html');
+                                return caches.match(OFFLINE_URL).then(cached => {
+                                    if (cached) {
+                                        return cached;
+                                    }
+                                    // If index.html is not cached, return a basic offline response
+                                    return new Response('<h1>Offline - No cached content available</h1>', {
+                                        status: 503,
+                                        headers: new Headers({ 'Content-Type': 'text/html' })
+                                    });
+                                });
                             }
                             
                             console.error('[Service Worker] Fetch failed:', error);

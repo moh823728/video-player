@@ -15,6 +15,8 @@ A simple, clean, and lightweight Progressive Web App (PWA) that allows you to st
 
 - `index.html` - Main application with video player and Telegram API integration
 - `sw.js` - Service Worker for offline functionality and caching
+- `manifest.json` - PWA manifest for app installation
+- `test-sw.html` - Service Worker testing page for debugging
 - `README.md` - This file with setup instructions
 
 ## Prerequisites
@@ -102,6 +104,16 @@ npx http-server
 ```
 
 Then open `http://localhost:8000` in your browser.
+
+#### Service Worker Testing
+
+For debugging Service Worker issues, use the included `test-sw.html` page:
+
+1. Open `test-sw.html` in your browser (via local server or GitHub Pages)
+2. Click "Test Registration" to verify Service Worker registration
+3. Click "Test Cache" to verify caching operations
+4. Check browser console (F12) for detailed logs
+5. Use "Unregister SW" to clear old Service Workers before testing new changes
 
 ### Step 7: Deploy to GitHub Pages
 
@@ -192,9 +204,12 @@ Once deployed, you can install the app on your device:
 
 ### "No video found in the channel"
 - Ensure your bot is added as an administrator to the channel
-- Verify the channel ID is correct (format: `-100XXXXXXXXXX`)
+- Verify the channel ID is correct (format: `-100XXXXXXXXXX`) with no invisible characters
 - Make sure there's at least one video in the channel
 - Check that the bot token is correct and not expired
+- Open browser console (F12) to see debug logs from the Telegram API
+- The bot must have permission to read messages in the channel
+- Videos uploaded as documents (not native video files) are now supported
 
 ### "Telegram API error"
 - Verify your bot token is correct
@@ -206,6 +221,8 @@ Once deployed, you can install the app on your device:
 - Clear your browser cache and reload
 - Check browser console for errors
 - Ensure `sw.js` is in the same directory as `index.html`
+- For GitHub Pages: The app uses relative paths (`./sw.js`) to work with subpath deployment
+- If Service Worker fails to register, try unregistering existing SWs in DevTools → Application → Service Workers
 
 ### Video not caching
 - Ensure you have sufficient storage space
@@ -218,6 +235,21 @@ Once deployed, you can install the app on your device:
 - Clear your browser cache
 - Check the GitHub Actions tab for deployment status
 - Ensure you're pushing to the correct branch
+- Service Worker may need to be unregistered and re-registered after deployment
+- Try opening DevTools → Application → Service Workers → "Unregister" and reload the page
+
+### GitHub Pages Service Worker 404 errors
+- The app uses relative paths (`./sw.js`, `./manifest.json`) to work with GitHub Pages subpaths
+- Ensure all files are in the root directory of your repository
+- GitHub Pages serves content from `https://username.github.io/repo-name/` - the relative paths handle this automatically
+- If you still get 404 errors, check that `sw.js` and `manifest.json` are committed to the repository
+- Use the `test-sw.html` page to debug Service Worker registration issues
+
+### GitHub Pages Service Worker 404 errors
+- The app uses relative paths (`./sw.js`, `./manifest.json`) to work with GitHub Pages subpaths
+- Ensure all files are in the root directory of your repository
+- GitHub Pages serves content from `https://username.github.io/repo-name/` - the relative paths handle this automatically
+- If you still get 404 errors, check that `sw.js` and `manifest.json` are committed to the repository
 
 ## Security Notes
 

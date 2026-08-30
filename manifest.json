@@ -1,0 +1,16 @@
+{
+  "name": "Telegram Video Player",
+  "short_name": "Video Player",
+  "description": "Offline Video Player for Telegram Channel",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#1a1a1a",
+  "theme_color": "#1a1a1a",
+  "orientation": "portrait",
+  "categories": ["entertainment", "video"],
+  "scope": "./",
+  "serviceworker": {
+    "src": "./sw.js",
+    "scope": "./"
+  }
+}
