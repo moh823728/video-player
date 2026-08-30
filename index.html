@@ -201,7 +201,6 @@
 
         <div class="controls">
             <button class="primary" id="loadBtn">Load Latest Video</button>
-            <button id="cacheBtn">Cache Video</button>
             <button id="clearCacheBtn">Clear Cache</button>
         </div>
 
@@ -225,7 +224,7 @@
             CHANNEL_ID: '-1004498225842',
             
             // Cache name for offline storage
-            CACHE_NAME: 'telegram-video-cache-v1'
+            CACHE_NAME: 'telegram-video-cache-v2'
         };
 
         // ========================================
@@ -244,7 +243,6 @@
         const statusDot = document.getElementById('statusDot');
         const statusText = document.getElementById('statusText');
         const loadBtn = document.getElementById('loadBtn');
-        const cacheBtn = document.getElementById('cacheBtn');
         const clearCacheBtn = document.getElementById('clearCacheBtn');
         const loading = document.getElementById('loading');
         const error = document.getElementById('error');
@@ -343,79 +341,50 @@
                 const filePath = fileData.result.file_path;
                 currentVideoUrl = `https://api.telegram.org/file/bot${CONFIG.BOT_TOKEN}/${filePath}`;
 
+                // Fetch video as blob through proxy and auto-cache
+                const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(currentVideoUrl)}`;
+                console.log('Fetching video via proxy:', proxyUrl);
+                
+                const videoResponse = await fetch(proxyUrl);
+                if (!videoResponse.ok) {
+                    throw new Error(`Proxy failed with status: ${videoResponse.status}`);
+                }
+
+                const blob = await videoResponse.blob();
+                if (blob.size === 0) {
+                    throw new Error('Downloaded video blob is empty');
+                }
+
+                // Create object URL for immediate playback
+                const objectUrl = URL.createObjectURL(blob);
+                videoPlayer.src = objectUrl;
+                videoPlayer.load();
+
+                // Auto-cache the blob
+                if ('caches' in window) {
+                    const cache = await caches.open(CONFIG.CACHE_NAME);
+                    const cachedResponse = new Response(blob, {
+                        headers: { 
+                            'Content-Type': 'video/mp4',
+                            'Content-Length': blob.size.toString()
+                        }
+                    });
+                    await cache.put(currentVideoUrl, cachedResponse);
+                    
+                    localStorage.setItem('lastCachedVideoUrl', currentVideoUrl);
+                    localStorage.setItem('lastCachedVideoTitle', currentVideoTitle || 'Video');
+                    localStorage.setItem('lastCachedVideoDate', currentVideoDate || '-');
+                    
+                    console.log('Video auto-cached successfully');
+                }
+
                 // Update UI
-                updateVideoPlayer();
                 updateInfo();
-                updateStatus('online');
+                updateStatus('cached');
 
             } catch (err) {
                 showError(err.message);
                 updateStatus('error');
-            } finally {
-                showLoading(false);
-            }
-        }
-
-        /**
-         * Cache the current video for offline use
-         */
-        async function cacheVideo() {
-            if (!currentVideoUrl) {
-                showError('No video loaded to cache');
-                return;
-            }
-
-            try {
-                showLoading(true);
-                hideError();
-
-                // Check if service worker is already registered
-                if ('serviceWorker' in navigator) {
-                    const registration = await navigator.serviceWorker.getRegistration();
-                    if (!registration) {
-                        // Register service worker if not already registered
-                        await navigator.serviceWorker.register('./sw.js', { scope: './' });
-                        console.log('Service Worker registered');
-                    }
-                }
-
-                // Fetch with no-cache and request headers to bypass 503 throttling
-                const response = await fetch(currentVideoUrl, {
-                    method: 'GET',
-                    headers: {
-                        'Accept': 'video/mp4,video/*;q=0.9,*/*;q=0.8'
-                    }
-                });
-
-                if (!response.ok) {
-                    throw new Error(`Telegram server error (${response.status} ${response.statusText}). Direct download blocked.`);
-                }
-
-                // Download as blob to avoid 503 errors with streaming
-                const blob = await response.blob();
-                
-                // Create a new Response with the blob and proper headers
-                const cachedResponse = new Response(blob, {
-                    headers: { 
-                        'Content-Type': response.headers.get('Content-Type') || 'video/mp4',
-                        'Content-Length': blob.size.toString()
-                    }
-                });
-
-                // Open cache and store the blob response
-                const cache = await caches.open(CONFIG.CACHE_NAME);
-                await cache.put(currentVideoUrl, cachedResponse);
-
-                // Save last cached video URL and metadata in localStorage for offline initialization
-                localStorage.setItem('lastCachedVideoUrl', currentVideoUrl);
-                localStorage.setItem('lastCachedVideoTitle', currentVideoTitle || 'Video');
-                localStorage.setItem('lastCachedVideoDate', currentVideoDate || '-');
-
-                updateStatus('cached');
-                alert('Video cached successfully! You can now watch it offline.');
-
-            } catch (err) {
-                showError(`Failed to cache video: ${err.message}`);
             } finally {
                 showLoading(false);
             }
@@ -433,12 +402,13 @@
                     localStorage.removeItem('lastCachedVideoUrl');
                     localStorage.removeItem('lastCachedVideoTitle');
                     localStorage.removeItem('lastCachedVideoDate');
+                    localStorage.removeItem('saved_video_time');
                     
                     // Reset current video state
                     currentVideoUrl = null;
                     currentVideoTitle = null;
                     currentVideoDate = null;
-                    updateVideoPlayer();
+                    videoPlayer.src = '';
                     updateInfo();
                     
                     updateStatus('online');
@@ -462,8 +432,8 @@
         // ========================================
 
         function updateVideoPlayer() {
-            videoPlayer.src = currentVideoUrl;
-            videoPlayer.load();
+            // Player is updated directly in fetchLatestVideo with object URL
+            // This function is kept for compatibility with cached video loading
         }
 
         function updateInfo() {
@@ -497,7 +467,6 @@
         function showLoading(show) {
             loading.classList.toggle('show', show);
             loadBtn.disabled = show;
-            cacheBtn.disabled = show;
             clearCacheBtn.disabled = show;
         }
 
@@ -536,8 +505,54 @@
         // ========================================
 
         loadBtn.addEventListener('click', fetchLatestVideo);
-        cacheBtn.addEventListener('click', cacheVideo);
         clearCacheBtn.addEventListener('click', clearCache);
+
+        // ========================================
+        // PLAYBACK TIME PERSISTENCE
+        // ========================================
+        
+        // Save playback time every 2 seconds
+        let saveTimeInterval;
+        videoPlayer.addEventListener('timeupdate', () => {
+            if (!saveTimeInterval) {
+                saveTimeInterval = setInterval(() => {
+                    if (videoPlayer.currentTime > 0) {
+                        localStorage.setItem('saved_video_time', videoPlayer.currentTime.toString());
+                        console.log('Saved playback time:', videoPlayer.currentTime);
+                    }
+                }, 2000);
+            }
+        });
+
+        // Clear interval when video is paused
+        videoPlayer.addEventListener('pause', () => {
+            if (saveTimeInterval) {
+                clearInterval(saveTimeInterval);
+                saveTimeInterval = null;
+            }
+        });
+
+        // Reset saved time when video ends
+        videoPlayer.addEventListener('ended', () => {
+            localStorage.removeItem('saved_video_time');
+            console.log('Video ended, reset saved playback time');
+            if (saveTimeInterval) {
+                clearInterval(saveTimeInterval);
+                saveTimeInterval = null;
+            }
+        });
+
+        // Resume from saved time when video loads
+        videoPlayer.addEventListener('loadedmetadata', () => {
+            const savedTime = localStorage.getItem('saved_video_time');
+            if (savedTime) {
+                const time = parseFloat(savedTime);
+                if (!isNaN(time) && time > 0 && time < videoPlayer.duration) {
+                    videoPlayer.currentTime = time;
+                    console.log('Resumed from saved time:', time);
+                }
+            }
+        });
 
         // ========================================
         // INITIALIZATION
@@ -587,12 +602,17 @@
                         const cachedResponse = await cache.match(cachedUrl);
 
                         if (cachedResponse) {
-                            // Load the cached video
+                            // Load the cached video as blob
+                            const blob = await cachedResponse.blob();
+                            const objectUrl = URL.createObjectURL(blob);
+                            
                             currentVideoUrl = cachedUrl;
                             currentVideoTitle = cachedTitle || 'Cached Video';
                             currentVideoDate = cachedDate || '-';
                             
-                            updateVideoPlayer();
+                            videoPlayer.src = objectUrl;
+                            videoPlayer.load();
+                            
                             updateInfo();
                             updateStatus('cached');
                             console.log('Loaded cached video from localStorage:', cachedUrl);

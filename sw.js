@@ -2,7 +2,7 @@
 // SERVICE WORKER FOR OFFLINE FUNCTIONALITY
 // ========================================
 
-const CACHE_NAME = 'telegram-video-cache-v1';
+const CACHE_NAME = 'telegram-video-cache-v2';
 const OFFLINE_URL = './index.html';
 
 // ========================================
