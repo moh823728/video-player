@@ -190,7 +190,12 @@ self.addEventListener('message', (event) => {
         caches.open(CACHE_NAME)
             .then((cache) => {
                 // Fetch video as blob to handle ranged requests and 503 errors
-                return fetch(videoUrl)
+                return fetch(videoUrl, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'video/mp4,video/*;q=0.9,*/*;q=0.8'
+                    }
+                })
                     .then((response) => {
                         if (!response.ok) {
                             throw new Error(`Failed to fetch video: ${response.status} ${response.statusText}`);
